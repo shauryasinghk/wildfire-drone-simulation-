@@ -1,0 +1,32 @@
+#VRML_SIM R2025a utf8
+
+IMPORTABLE EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/robots/dji/mavic/protos/Mavic2Pro.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackground.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/floors/protos/RectangleArena.proto"
+
+WorldInfo {
+  title "Drone Swarm Simulation"
+  basicTimeStep 16
+}
+Viewpoint {
+  orientation -0.46733837549712876 0.4490097842976678 0.7615674995643307 1.8782276095076693
+  position 0.614681183688998 -14.92248739360852 28.066145241742376
+}
+TexturedBackground {
+}
+TexturedBackgroundLight {
+}
+RectangleArena {
+  floorSize 20 20
+}
+Robot {
+  name "swarm_supervisor"
+  controller "swarm_controller"
+  supervisor TRUE
+}
+Mavic2Pro {
+  translation -1.67 0 0.12
+  name "drone_0"
+  controller "drone_controller"
+}
