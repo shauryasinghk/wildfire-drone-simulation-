@@ -4,21 +4,35 @@ IMPORTABLE EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R20
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackground.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/floors/protos/RectangleArena.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/appearances/protos/Grass.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/trees/protos/Tree.proto"
 
 WorldInfo {
   title "Drone Swarm Simulation"
   basicTimeStep 16
 }
 Viewpoint {
-  orientation -0.46733837549712876 0.4490097842976678 0.7615674995643307 1.8782276095076693
-  position 0.614681183688998 -14.92248739360852 28.066145241742376
+  orientation -0.05314535217152731 0.20922473590073756 0.9764223376335831 0.5090067030716322
+  position -35.48540580025961 -15.907156389830227 2.5845124143730986
+  follow "drone_0"
+  lensFlare LensFlare {
+    transparency 0.7
+    scale 1.2
+    dispersal 0.7
+    haloWidth 0.6
+    chromaDistortion 4
+    blurIterations 6
+  }
+  bloomThreshold 3
 }
 TexturedBackground {
+  luminosity 1.1
 }
 TexturedBackgroundLight {
 }
 RectangleArena {
-  floorSize 20 20
+  translation -19.96 -5.62 0.01
+  floorSize 4 4
 }
 Robot {
   name "swarm_supervisor"
@@ -26,7 +40,83 @@ Robot {
   supervisor TRUE
 }
 Mavic2Pro {
-  translation -1.67 0 0.12
+  translation -20.47 -5.87 0.05
   name "drone_0"
   controller "drone_controller"
+}
+DEF FIRE_0 Transform {
+  translation -4.05 0.0999949 4
+  rotation -0.5773509358554485 -0.5773489358556708 -0.5773509358554485 -2.094395307179586
+  scale 0.5 0.5 0.5
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 1 0.3 0
+        roughness 1
+        metalness 0
+        IBLStrength 100
+        occlusionMapStrength 0
+        emissiveColor 1 0.5 0
+        emissiveIntensity 700
+      }
+      geometry Mesh {
+        url [
+          "../../../../Downloads/fire.obj"
+        ]
+        materialIndex 0
+      }
+      castShadows FALSE
+    }
+  ]
+}
+Transform {
+  rotation 1 0 0 1.5708
+  scale 35 15 35
+  children [
+    Shape {
+      appearance Grass {
+        colorOverride 0.9 0.8 1
+        type "mossy"
+        textureTransform TextureTransform {
+          scale 13 13
+        }
+        IBLStrength 2
+      }
+      geometry Mesh {
+        url [
+          "../../../../Downloads/map1.obj"
+        ]
+        materialIndex 1
+      }
+    }
+  ]
+}
+Tree {
+  translation 5.66 0 4.5
+  rotation 0 0 1 1.309
+  locked FALSE
+}
+Tree {
+  translation -2.42 7.04 4.49
+  rotation 0 0 1 -0.523595307179586
+  name "tree(1)"
+  locked FALSE
+}
+Tree {
+  translation -11.12 17.7 3.4
+  rotation 0 0 1 -0.785395307179586
+  name "tree(4)"
+  locked FALSE
+}
+Tree {
+  translation 0 17.7 4.74
+  rotation 0 0 1 -1.3089953071795861
+  name "tree(2)"
+  locked FALSE
+}
+Tree {
+  translation -5.07 -14.61 0.9
+  rotation 0 0 1 -0.785395307179586
+  name "tree(3)"
+  locked FALSE
 }

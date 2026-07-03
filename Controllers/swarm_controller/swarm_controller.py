@@ -1,116 +1,86 @@
-from controller import Supervisor
-import math
+import gymnasium as gym
+from gymnasium import spaces
+import numpy as np
+from stable_baselines3 import PPO
+from stable_baselines3.common.env_checker import check_env
 
-NUM_DRONES = 4  # Change this to 2, 4, 9, etc.
-SPACING = 3.0
-TARGET_HEIGHT = 3.0
+# Import the environment we built in the previous step
+# Assuming it is saved as 'swarm_env.py'
+from swarm_env import WildfireSwarmEnv, NUM_DRONES 
 
-supervisor = Supervisor()
-timestep = int(supervisor.getBasicTimeStep())
+class WildfireGymWrapper(gym.Env):
+    """
+    Wraps our custom Webots Swarm Environment into a standard Gymnasium interface
+    so Stable-Baselines3 can train it.
+    """
+    def __init__(self, supervisor):
+        super().__init__()
+        self.webots_env = WildfireSwarmEnv(supervisor)
+        
+        # Action Space: 7 discrete actions (0-6) for each of the drones.
+        # We use MultiDiscrete to send an array of actions, one for each drone.
+        self.action_space = spaces.MultiDiscrete([7] * NUM_DRONES)
+        
+        # Observation Space: Flattened array of all drones' local observations
+        # Each drone has 6 values: [X, Y, Z, Rel_Fire_X, Rel_Fire_Y, Neighbor_Dist]
+        obs_length_per_drone = 6
+        total_obs_length = obs_length_per_drone * NUM_DRONES
+        
+        # Define limits for the observation variables (e.g., -100 to 100 meters)
+        self.observation_space = spaces.Box(
+            low=-100.0, high=100.0, 
+            shape=(total_obs_length,), 
+            dtype=np.float32
+        )
 
-# FIXED: Fetch the dedicated Keyboard device instance and enable it
-keyboard = supervisor.getKeyboard()
-keyboard.enable(timestep)
+    def reset(self, seed=None, options=None):
+        super().reset(seed=seed)
+        # In Webots, resetting usually involves reverting the simulation to its initial state
+        self.webots_env.sv.simulationReset()
+        self.webots_env.sv.step(self.webots_env.timestep)
+        
+        # Clear our tracking grid
+        self.webots_env.coverage_grid.fill(0)
+        
+        # Get fresh observations and flatten them for the Neural Network
+        raw_obs = self.webots_env.get_observations()
+        flat_obs = np.concatenate([raw_obs[i] for i in range(NUM_DRONES)])
+        
+        return flat_obs, {}
 
-drones = []
+    def step(self, action_array):
+        # Convert Gym's action array back into the dictionary our environment expects
+        actions_dict = {i: action for i, action in enumerate(action_array)}
+        
+        # Step the Webots simulation
+        next_raw_obs, reward, done = self.webots_env.step(actions_dict)
+        
+        # Flatten the new observations
+        flat_obs = np.concatenate([next_raw_obs[i] for i in range(NUM_DRONES)])
+        
+        # Stable-Baselines expects (obs, reward, terminated, truncated, info)
+        return flat_obs, reward, done, False, {}
 
-root = supervisor.getRoot()
-children_field = root.getField('children')
-
-# --- DYNAMIC SWARM SPAWNING BLOCKS ---
-for i in range(NUM_DRONES):
-    if i == 0:
-        drone = supervisor.getFromDef('drone_0')
-        drones.append(drone)
-        continue
-
-    wait_steps = max(1, int(10 / timestep))  # 100 ms spacing buffer
-    for _ in range(wait_steps):
-        supervisor.step(timestep)
-
-    x = i * SPACING
-    y = 0.0
-    z = 0.12
-
-    drone_string = (
-        f'Mavic2Pro {{ '
-        f'name "drone_{i}" '
-        f'translation {x} {y} {z} '
-        f'controller "drone_controller" '
-        f'}}'
-    )
-
-    children_field.importMFNodeFromString(-1, drone_string)
-    drone = supervisor.getFromDef(f'drone_{i}')
-    drones.append(drone)
-
-# Default configuration state at startup
-current_mode = 1
-print("Swarm Init Completed. Click 3D Window and press '1', '2', or '3' to change formations!")
-
-# --- MAIN SUPERVISOR RUNTIME LOOP ---
-while supervisor.step(timestep) != -1:
-    # FIXED: Capture user keyboard strokes from the keyboard device instance
-    key = keyboard.getKey()
+# --- EXECUTION & TRAINING ---
+if __name__ == "__main__":
+    from controller import Supervisor
+    supervisor = Supervisor()
     
-    if key == ord('1'):
-        current_mode = 1
-        print("Swarm Command: Mode 1 -> Broad Grid Line Search Formation")
-    elif key == ord('2'):
-        current_mode = 2
-        print("Swarm Command: Mode 2 -> Fire Encirclement Perimeter Ring")
-    elif key == ord('3'):
-        current_mode = 3
-        print("Swarm Command: Mode 3 -> Low Altitude Safe Cluster/Rally")
-
-    # 2. Process positions and send discrete commands to individual drones
-    for i, drone in enumerate(drones):
-        if drone is None:
-            continue
-        
-        # Determine the unique target $(x, y, z)$ position for this drone based on selected mode
-        if current_mode == 1:
-            # Formation 1: Evenly spaced row layout along the Y-axis
-            target_x = 0.0
-            target_y = (i - (NUM_DRONES - 1) / 2) * SPACING
-            target_z = TARGET_HEIGHT
-            
-        elif current_mode == 2:
-            # Formation 2: Radial circle pattern around origin center
-            angle = (2 * math.pi * i) / NUM_DRONES
-            radius = 6.0
-            target_x = radius * math.cos(angle)
-            target_y = radius * math.sin(angle)
-            target_z = TARGET_HEIGHT
-            
-        else:
-            # Formation 3: Tight low-altitude hover collection point
-            angle = (2 * math.pi * i) / NUM_DRONES
-            radius = 1.5
-            target_x = radius * math.cos(angle)
-            target_y = radius * math.sin(angle)
-            target_z = 1.5
-
-        # 3. Get actual drone position via the supervisor spatial tracking nodes
-        current_pos = drone.getPosition() # Returns [X, Y, Z] global coordinates
-        
-        err_x = target_x - current_pos[0]
-        err_y = target_y - current_pos[1]
-        err_z = target_z - current_pos[2]
-        
-        # 4. Convert structural errors into discrete actions (0-6) matching the drone's input map
-        # Tolerance margin prevents continuous jittering once inside the destination boundary
-        TOLERANCE = 0.3 
-        action = 0  # Default: Hover / Keep Position
-        
-        if abs(err_x) > TOLERANCE:
-            action = 1 if err_x > 0 else 2  # 1: Move Forward (+X), 2: Move Backward (-X)
-        elif abs(err_y) > TOLERANCE:
-            action = 3 if err_y > 0 else 4  # 3: Move Left (+Y), 4: Move Right (-Y)
-        elif abs(err_z) > TOLERANCE:
-            action = 5 if err_z > 0 else 6  # 5: Ascend (+Z), 6: Descend (-Z)
-        
-        # 5. Push the single integer action instruction down to the customData string pipeline
-        pos_field = drone.getField('customData')
-        if pos_field:
-            pos_field.setSFString(str(action))
+    # 1. Initialize the wrapper
+    gym_env = WildfireGymWrapper(supervisor)
+    
+    # 2. Verify the environment complies with gym standards
+    check_env(gym_env, warn=True)
+    
+    print("Starting PPO Neural Network Training...")
+    
+    # 3. Build the Neural Network Model
+    # MlpPolicy creates a standard feed-forward neural network
+    model = PPO("MlpPolicy", gym_env, verbose=1, tensorboard_log="./ppo_wildfire_tensorboard/")
+    
+    # 4. Train the drones for 500,000 timesteps
+    model.learn(total_timesteps=500000)
+    
+    # 5. Save the artificial brain!
+    model.save("ppo_wildfire_swarm")
+    print("Training Complete. Model saved as 'ppo_wildfire_swarm.zip'")
