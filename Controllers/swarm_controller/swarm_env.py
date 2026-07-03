@@ -155,6 +155,11 @@ class WildfireSwarmEnv:
 
 # --- CHOREOGRAPHED REINFORCEMENT LEARNING RUNTIME LOOP ---
 if __name__ == "__main__":
+    # 1. Initialize the Webots Supervisor and Timestep
+    supervisor = Supervisor()
+    timestep = int(supervisor.getBasicTimeStep())
+    
+    # 2. Now you can safely pass the supervisor into your environment
     env = WildfireSwarmEnv(supervisor)
     print("RL Environment Framework Initialized. Running Policy Networks...")
     
@@ -167,7 +172,7 @@ if __name__ == "__main__":
         # In actual training, you pass 'current_observations' into your MAPPO Actor Neural Networks:
         # actions = policy.predict(current_observations)
         actions = {}
-        for i in range(NUM_DRONES):
+        for i in range(NUM_DRONES): # Ensure NUM_DRONES is also defined above!
             # For demonstration purposes: Pick a random exploration action (0 to 6)
             actions[i] = np.random.randint(0, 7)
             
