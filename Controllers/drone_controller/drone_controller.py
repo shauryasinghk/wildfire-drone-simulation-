@@ -38,14 +38,14 @@ HOVER_SPEED = 68.5      # Baseline motor RPM required to counteract gravity
 K_P_ALT = 8.0           # Altitude proportional gain
 K_D_ALT = 4.0           # Vertical velocity braking (stops vertical bouncing)
 
-K_P_POS = 0.2           # Horizontal positioning tracking speed
-K_D_POS = 0.15          # NEW: Horizontal braking gain (stops the drone from overshooting)
+K_P_POS = 0.15          # Horizontal positioning tracking speed (reduced to prevent aggressive movement)
+K_D_POS = 0.15          # Horizontal braking gain (stops the drone from overshooting)
 
-K_P_ATT = 16.0          # Leveling sharpness (Attitude correction force)
-K_D_ANG = 4.0           # Rotational angular velocity dampening (Stops the wobbling)
+K_P_ATT = 10.0          # Leveling sharpness (reduced from 16.0 to prevent aggressive overshooting)
+K_D_ANG = 8.0           # Rotational angular velocity dampening (increased from 4.0 for more stability)
 K_YAW_D = 3.0           # Anti-spin angular brake (Stops the spinning)
 
-MAX_ANGLE = 0.4         # Max tilt pitch/roll constraint
+MAX_ANGLE = 0.25        # Max tilt pitch/roll constraint (reduced from 0.4 to prevent extreme angles)
 STEP_SIZE = 0.04        # NEW: Distance (meters) the target shifts per timestep when moving
 
 # Historical positions for velocity calculation

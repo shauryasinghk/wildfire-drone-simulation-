@@ -12,10 +12,10 @@ WorldInfo {
   basicTimeStep 16
 }
 Viewpoint {
-  orientation 0.014358591400921192 0.047041542109053994 -0.9987897297074012 0.5931766083312989
-  position -35.415147531103194 2.5912304346830783 2.574165494543618
+  orientation 0.13190508641782367 0.5139015457349512 -0.8476474794797271 0.5880606137808674
+  position -25.938482905990117 -4.634087247756999 1.955919114901032
   follow "drone_0"
-  followSmoothness 0.1
+  followType "Mounted Shot"
   lensFlare LensFlare {
     transparency 0.7
     scale 1.2
@@ -48,7 +48,7 @@ DEF drone_0 Mavic2Pro {
   translation -21.41 -7.08 0.05
   name "drone_0"
   controller "drone_controller"
-  customData "4"
+  customData "2"
 }
 DEF FIRE_0 Transform {
   translation -4.05 0.0999949 4

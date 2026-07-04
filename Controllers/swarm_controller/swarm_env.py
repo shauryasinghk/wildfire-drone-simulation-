@@ -6,7 +6,10 @@ from typing import List, Dict, Tuple
 # --- RL ENVIRONMENT HYPERPARAMETERS ---
 NUM_DRONES = 1
 SPACING = 3.0
-FOREST_SIZE = 40.0       # Size of the forest simulation area (meters)
+FOREST_SIZE = 69.0       # Side length of the square forest area in meters
+FOREST_ORIGIN = np.array([-FOREST_SIZE / 2.0, -FOREST_SIZE / 2.0])
+FOREST_MAX = FOREST_ORIGIN + np.array([FOREST_SIZE, FOREST_SIZE])
+FOREST_CENTER = FOREST_ORIGIN + np.array([FOREST_SIZE / 2.0, FOREST_SIZE / 2.0])
 GRID_RESOLUTION = 2.0    # Each grid cell is 2x2 meters
 COLLISION_DIST = 4.0     # Penalty threshold if drones get too close
 DETECTION_RADIUS = 6.0   # Distance inside which a drone "detects" the fire
@@ -38,9 +41,16 @@ class WildfireSwarmEnv:
         self.fire_node = self.sv.getFromDef("FIRE_0")
         if self.fire_node is None:
             print("WARNING: No node named 'FIRE_0' found in Scene Tree. Using origin fallback.")
+        
+        # Track the camera node with fixed viewport position and orientation
+        self.camera_node = self.sv.getFromDef("camera") or self.sv.getFromDef("Camera")
+        self.initial_camera_state = {
+            "translation": [-25.9, -4.64, 1.93],
+            "rotation": [0.132, 0.514, -0.848, 0.588]
+        }
             
         # Initialize Forest Coverage Grid Tracking Matrix
-        self.grid_cells = int(FOREST_SIZE / GRID_RESOLUTION)
+        self.grid_cells = int(np.ceil(FOREST_SIZE / GRID_RESOLUTION))
         self.coverage_grid = np.zeros((self.grid_cells, self.grid_cells), dtype=np.int32)
 
     def _spawn_swarm(self):
@@ -87,6 +97,12 @@ class WildfireSwarmEnv:
                 node.resetPhysics()
 
         self.sv.simulationResetPhysics()
+        
+        # Reset camera to fixed viewport position and orientation
+        if self.camera_node is not None:
+            self.camera_node.getField("translation").setSFVec3f(self.initial_camera_state["translation"])
+            self.camera_node.getField("rotation").setSFRotation(self.initial_camera_state["rotation"])
+        
         self.coverage_grid.fill(0)
         # Clear per-drone detection flags and reward shaping state at the start of each episode
         self.has_detected_fire = {i: False for i in range(NUM_DRONES)}
@@ -175,13 +191,22 @@ class WildfireSwarmEnv:
         # 1. Coverage Reward Allocation Loop
         for i, my_pos in enumerate(positions):
             # Map physical continuous position coordinates down into our virtual index array grid
-            grid_x = int((my_pos[0] + FOREST_SIZE/2) / GRID_RESOLUTION)
-            grid_y = int((my_pos[1] + FOREST_SIZE/2) / GRID_RESOLUTION)
+            grid_x = int((my_pos[0] - FOREST_ORIGIN[0]) / GRID_RESOLUTION)
+            grid_y = int((my_pos[1] - FOREST_ORIGIN[1]) / GRID_RESOLUTION)
             
             if 0 <= grid_x < self.grid_cells and 0 <= grid_y < self.grid_cells:
                 if self.coverage_grid[grid_x, grid_y] == 0:
                     self.coverage_grid[grid_x, grid_y] = 1
                     shared_reward += 5.0  # Shared bonus points for exploring new territory
+
+        # 1.5 Boundary Constraint: Penalize drones wandering too far from forest area
+        # Prevents extreme exploration that destabilizes the drone
+        for i, my_pos in enumerate(positions):
+            boundary = (FOREST_SIZE / 2.0) * 0.75  # Allow exploration up to 75% of forest half-width from center
+            distance_from_center = np.linalg.norm(my_pos[:2] - FOREST_CENTER)
+            if distance_from_center > boundary:
+                excess = distance_from_center - boundary
+                shared_reward -= 0.1 * excess  # Penalty increases with distance beyond boundary
 
         # 2. Team Proximity Proximity Penalties
         for i in range(NUM_DRONES):
@@ -209,6 +234,7 @@ class WildfireSwarmEnv:
                 if not self.has_detected_fire.get(i, False):
                     self.has_detected_fire[i] = True
                     shared_reward += 20.0
+                    print(f"Drone {i} entered detection radius at {dist_to_fire:.2f}m and received the reward.")
 
             self.last_fire_distances[i] = dist_to_fire
 
