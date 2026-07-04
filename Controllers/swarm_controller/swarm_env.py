@@ -43,22 +43,32 @@ class WildfireSwarmEnv:
     def _spawn_swarm(self):
         root = self.sv.getRoot()
         children_field = root.getField('children')
-        
+
+        base_drone = self.sv.getFromDef('drone_0')
+        if base_drone is not None:
+            base_pos = np.array(base_drone.getPosition())
+        else:
+            base_pos = np.array([0.0, 0.0, 0.12])
+
         for i in range(NUM_DRONES):
             if i == 0:
-                self.drones.append(self.sv.getFromDef('drone_0'))
+                self.drones.append(base_drone)
                 continue
-                
+
             # 100ms staggering buffer during creation loop
             wait_steps = max(1, int(10 / self.timestep))
             for _ in range(wait_steps):
                 self.sv.step(self.timestep)
-                
-            x = i * SPACING
+
+            offset_x = (i % 2) * SPACING
+            offset_y = (i // 2) * SPACING
+            x = base_pos[0] + offset_x
+            y = base_pos[1] + offset_y
+            z = base_pos[2]
             drone_string = (
                 f'DEF drone_{i} Mavic2Pro {{ '
                 f'name "drone_{i}" '
-                f'translation {x} 0.0 0.12 '
+                f'translation {x} {y} {z} '
                 f'controller "drone_controller" '
                 f'}}'
             )
