@@ -21,8 +21,11 @@ LOCATIONS = (
 
 # Set the fire position once
 robot.step(timestep)
-location = random.choice(LOCATIONS)
+location = list(random.choice(LOCATIONS))
 print(location)
+
+translation.setSFVec3f(location)
+print("Current:", translation.getSFVec3f())
 translation.setSFVec3f(location)
 robot.step(timestep)
 

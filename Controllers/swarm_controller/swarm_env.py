@@ -4,12 +4,13 @@ import math
 from typing import List, Dict, Tuple
 
 # --- RL ENVIRONMENT HYPERPARAMETERS ---
-NUM_DRONES = 4
+NUM_DRONES = 1
 SPACING = 3.0
 FOREST_SIZE = 40.0       # Size of the forest simulation area (meters)
 GRID_RESOLUTION = 2.0    # Each grid cell is 2x2 meters
 COLLISION_DIST = 4.0     # Penalty threshold if drones get too close
 DETECTION_RADIUS = 6.0   # Distance inside which a drone "detects" the fire
+MAX_EPISODE_STEPS = 5000 # Maximum steps per episode to prevent infinite loops
 
 class WildfireSwarmEnv:
     def __init__(self, supervisor_instance: Supervisor):
@@ -30,6 +31,8 @@ class WildfireSwarmEnv:
                 }
         # Track which drones have already received a detection reward this episode
         self.has_detected_fire = {i: False for i in range(NUM_DRONES)}
+        self.last_fire_distances = {}
+        self.step_count = 0
         
         # Track down the Fire/Wildfire node in the Webots world file
         self.fire_node = self.sv.getFromDef("FIRE_0")
@@ -85,8 +88,10 @@ class WildfireSwarmEnv:
 
         self.sv.simulationResetPhysics()
         self.coverage_grid.fill(0)
-        # Clear per-drone detection flags at the start of each episode
+        # Clear per-drone detection flags and reward shaping state at the start of each episode
         self.has_detected_fire = {i: False for i in range(NUM_DRONES)}
+        self.last_fire_distances = {}
+        self.step_count = 0
         self.sv.step(self.timestep)
         return self.get_observations()
 
@@ -138,6 +143,25 @@ class WildfireSwarmEnv:
             
         return obs
 
+    def is_drone_flipped(self, node) -> bool:
+        """Check if drone has flipped (inverted orientation).
+        Uses rotation vector to compute if local Z-axis (up) points downward.
+        """
+        if node is None:
+            return False
+        
+        # Get rotation as axis-angle: [axis_x, axis_y, axis_z, angle_radians]
+        rotation = node.getField('rotation').getSFRotation()
+        axis_x, axis_y, axis_z, angle = rotation
+        
+        # For local up vector (0, 0, 1) rotated by axis-angle (n, theta):
+        # Z_component_rotated = cos(theta) + (1 - cos(theta)) * axis_z^2
+        # If this is < 0.3, drone is severely tilted or upside-down
+        cos_angle = math.cos(angle)
+        z_component = cos_angle + (1 - cos_angle) * (axis_z ** 2)
+        
+        return z_component < 0.3
+
     def compute_step_rewards(self) -> Tuple[float, Dict[int, bool]]:
         """
         Calculates the global collective cooperative reward pool.
@@ -166,9 +190,18 @@ class WildfireSwarmEnv:
                 if dist < COLLISION_DIST:
                     shared_reward -= 10.0 * (COLLISION_DIST - dist)  # Progressive safety constraint
 
-        # 3. Target Search / Fire Spotting Bonus
+        # 3. Dense reward shaping for approaching the fire
         for i, my_pos in enumerate(positions):
             dist_to_fire = np.linalg.norm(my_pos[:2] - fire_pos[:2])  # 2D Ground distance
+            prev_dist = self.last_fire_distances.get(i)
+
+            if prev_dist is not None:
+                dist_change = prev_dist - dist_to_fire
+                if dist_change > 0:
+                    shared_reward += 0.25 * dist_change
+                else:
+                    shared_reward -= 0.10 * abs(dist_change)
+
             if dist_to_fire <= DETECTION_RADIUS:
                 # Mark current detection (used for done condition)
                 detections[i] = True
@@ -177,10 +210,18 @@ class WildfireSwarmEnv:
                     self.has_detected_fire[i] = True
                     shared_reward += 20.0
 
+            self.last_fire_distances[i] = dist_to_fire
+
+        # Per-step cost: Encourages agent to find fire quickly without wasting time
+        # Over 5000 steps, this accumulates to -50 penalty (same as timeout)
+        shared_reward -= 0.01
+
         return shared_reward, detections
 
     def step(self, actions: Dict[int, int]) -> Tuple[Dict[int, np.ndarray], float, bool]:
         """Executes selected model steps across all agents simultaneously in Webots."""
+        self.step_count += 1
+        
         # Inject the action keys down to the customData interfaces
         for i, action in actions.items():
             if self.drones[i]:
@@ -195,8 +236,21 @@ class WildfireSwarmEnv:
         next_obs = self.get_observations()
         reward, detections = self.compute_step_rewards()
         
-        # Check termination state: Game over if all drones successfully register fire contact
-        done = all(detections.values())
+        # Check if any drone has flipped (inverted orientation)
+        drone_flipped = False
+        for i, drone in enumerate(self.drones):
+            if self.is_drone_flipped(drone):
+                print(f"Drone {i} flipped! Episode terminated.")
+                drone_flipped = True
+                reward -= 100.0  # Harsh penalty for flipping
+                break
+        
+        # Check termination state: Game over if all drones detect fire, max steps reached, OR any drone flipped
+        done = all(detections.values()) or self.step_count >= MAX_EPISODE_STEPS or drone_flipped
+        
+        # Penalty if episode timeout occurs without detection
+        if self.step_count >= MAX_EPISODE_STEPS and not all(detections.values()):
+            reward -= 50.0
         
         return next_obs, reward, done
 
