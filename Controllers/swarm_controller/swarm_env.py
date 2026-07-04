@@ -20,6 +20,17 @@ class WildfireSwarmEnv:
         self.drones = []
         self._spawn_swarm()
         
+        # Cache initial pose data for reset without invalidating node references
+        self.initial_states = {}
+        for i, node in enumerate(self.drones):
+            if node is not None:
+                self.initial_states[i] = {
+                    "translation": node.getField("translation").getSFVec3f(),
+                    "rotation": node.getField("rotation").getSFRotation()
+                }
+        # Track which drones have already received a detection reward this episode
+        self.has_detected_fire = {i: False for i in range(NUM_DRONES)}
+        
         # Track down the Fire/Wildfire node in the Webots world file
         self.fire_node = self.sv.getFromDef("FIRE_0")
         if self.fire_node is None:
@@ -54,6 +65,21 @@ class WildfireSwarmEnv:
             children_field.importMFNodeFromString(-1, drone_string)
             self.drones.append(self.sv.getFromDef(f'drone_{i}'))
 
+    def reset(self):
+        """Reset the swarm state without invalidating dynamic Webots node references."""
+        for i, node in enumerate(self.drones):
+            if node is not None:
+                node.getField("translation").setSFVec3f(self.initial_states[i]["translation"])
+                node.getField("rotation").setSFRotation(self.initial_states[i]["rotation"])
+                node.resetPhysics()
+
+        self.sv.simulationResetPhysics()
+        self.coverage_grid.fill(0)
+        # Clear per-drone detection flags at the start of each episode
+        self.has_detected_fire = {i: False for i in range(NUM_DRONES)}
+        self.sv.step(self.timestep)
+        return self.get_observations()
+
     def get_global_fire_pos(self) -> np.ndarray:
         """Retrieves global fire target matrix via Supervisor spatial node lookups."""
         if self.fire_node:
@@ -72,20 +98,27 @@ class WildfireSwarmEnv:
         positions = [np.array(d.getPosition()) if d else np.array([0.,0.,0.]) for d in self.drones]
         
         for i, d in enumerate(self.drones):
-            if d is None: continue
+            if d is None:
+                obs[i] = np.zeros(6, dtype=np.float32)
+                continue
             my_pos = positions[i]
             
             # Vector vector pointing to the fire source
             rel_fire = fire_pos - my_pos
             
             # Find distance to the closest teammate drone
-            min_neighbor_dist = 999.0
+            min_neighbor_dist = float('inf')
             for j, other_pos in enumerate(positions):
                 if i != j:
                     dist = np.linalg.norm(my_pos - other_pos)
                     if dist < min_neighbor_dist:
                         min_neighbor_dist = dist
                         
+            if min_neighbor_dist == float('inf'):
+                min_neighbor_dist = 100.0
+            else:
+                min_neighbor_dist = min(min_neighbor_dist, 100.0)
+
             # Flatten into a raw continuous sensory observation array
             obs[i] = np.array([
                 my_pos[0], my_pos[1], my_pos[2],  # Self coordinates
@@ -127,8 +160,12 @@ class WildfireSwarmEnv:
         for i, my_pos in enumerate(positions):
             dist_to_fire = np.linalg.norm(my_pos[:2] - fire_pos[:2])  # 2D Ground distance
             if dist_to_fire <= DETECTION_RADIUS:
+                # Mark current detection (used for done condition)
                 detections[i] = True
-                shared_reward += 20.0  # Massive team incentive for locking coordinates onto the fire
+                # Give a one-time positive reward the first time this drone detects the fire
+                if not self.has_detected_fire.get(i, False):
+                    self.has_detected_fire[i] = True
+                    shared_reward += 20.0
 
         return shared_reward, detections
 

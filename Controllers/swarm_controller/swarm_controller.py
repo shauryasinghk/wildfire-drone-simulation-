@@ -35,17 +35,10 @@ class WildfireGymWrapper(gym.Env):
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
-        # In Webots, resetting usually involves reverting the simulation to its initial state
-        self.webots_env.sv.simulationReset()
-        self.webots_env.sv.step(self.webots_env.timestep)
-        
-        # Clear our tracking grid
-        self.webots_env.coverage_grid.fill(0)
-        
-        # Get fresh observations and flatten them for the Neural Network
-        raw_obs = self.webots_env.get_observations()
+        # Reset the Swarm environment without invalidating Webots node references
+        raw_obs = self.webots_env.reset()
         flat_obs = np.concatenate([raw_obs[i] for i in range(NUM_DRONES)])
-        
+        flat_obs = np.clip(flat_obs, -100.0, 100.0).astype(np.float32)
         return flat_obs, {}
 
     def step(self, action_array):
@@ -57,6 +50,7 @@ class WildfireGymWrapper(gym.Env):
         
         # Flatten the new observations
         flat_obs = np.concatenate([next_raw_obs[i] for i in range(NUM_DRONES)])
+        flat_obs = np.clip(flat_obs, -100.0, 100.0).astype(np.float32)
         
         # Stable-Baselines expects (obs, reward, terminated, truncated, info)
         return flat_obs, reward, done, False, {}

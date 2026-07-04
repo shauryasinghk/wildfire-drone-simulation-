@@ -35,11 +35,15 @@ RectangleArena {
   floorSize 4 4
 }
 Robot {
+  controller "fire_controller"
+  supervisor TRUE
+}
+Robot {
   name "swarm_supervisor"
   controller "swarm_controller"
   supervisor TRUE
 }
-Mavic2Pro {
+DEF drone_0 Mavic2Pro {
   translation -20.47 -5.87 0.05
   name "drone_0"
   controller "drone_controller"
