@@ -1,0 +1,17 @@
+{
+  "algorithm": "PPO",
+  "policy": "MlpPolicy",
+  "total_timesteps": 500000,
+  "learning_rate": 0.0003,
+  "gamma": 0.99,
+  "gae_lambda": 0.95,
+  "n_epochs": 10,
+  "n_steps": 2048,
+  "clip_range": 0.2,
+  "ent_coef": 0.0,
+  "vf_coef": 0.5,
+  "max_grad_norm": 0.5,
+  "batch_size": 64,
+  "checkpoint_frequency": 50000,
+  "training_start_time": "20260704_163039"
+}

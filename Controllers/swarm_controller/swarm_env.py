@@ -36,6 +36,7 @@ class WildfireSwarmEnv:
         self.has_detected_fire = {i: False for i in range(NUM_DRONES)}
         self.last_fire_distances = {}
         self.step_count = 0
+        self.flipped = False
         
         # Track down the Fire/Wildfire node in the Webots world file
         self.fire_node = self.sv.getFromDef("FIRE_0")
@@ -108,6 +109,7 @@ class WildfireSwarmEnv:
         self.has_detected_fire = {i: False for i in range(NUM_DRONES)}
         self.last_fire_distances = {}
         self.step_count = 0
+        self.flipped = False
         self.sv.step(self.timestep)
         return self.get_observations()
 
@@ -197,7 +199,7 @@ class WildfireSwarmEnv:
             if 0 <= grid_x < self.grid_cells and 0 <= grid_y < self.grid_cells:
                 if self.coverage_grid[grid_x, grid_y] == 0:
                     self.coverage_grid[grid_x, grid_y] = 1
-                    shared_reward += 5.0  # Shared bonus points for exploring new territory
+                    shared_reward += 1.0  # Smaller exploration bonus so the agent focuses on finding the fire
 
         # 1.5 Boundary Constraint: Penalize drones wandering too far from forest area
         # Prevents extreme exploration that destabilizes the drone
@@ -223,9 +225,9 @@ class WildfireSwarmEnv:
             if prev_dist is not None:
                 dist_change = prev_dist - dist_to_fire
                 if dist_change > 0:
-                    shared_reward += 0.25 * dist_change
+                    shared_reward += 0.5 * dist_change
                 else:
-                    shared_reward -= 0.10 * abs(dist_change)
+                    shared_reward -= 0.20 * abs(dist_change)
 
             if dist_to_fire <= DETECTION_RADIUS:
                 # Mark current detection (used for done condition)
@@ -233,14 +235,14 @@ class WildfireSwarmEnv:
                 # Give a one-time positive reward the first time this drone detects the fire
                 if not self.has_detected_fire.get(i, False):
                     self.has_detected_fire[i] = True
-                    shared_reward += 20.0
+                    shared_reward += 50.0
                     print(f"Drone {i} entered detection radius at {dist_to_fire:.2f}m and received the reward.")
 
             self.last_fire_distances[i] = dist_to_fire
 
         # Per-step cost: Encourages agent to find fire quickly without wasting time
-        # Over 5000 steps, this accumulates to -50 penalty (same as timeout)
-        shared_reward -= 0.01
+        # Over 5000 steps, this accumulates to -500 penalty, making slow search much more expensive
+        shared_reward -= 0.10
 
         return shared_reward, detections
 
@@ -266,9 +268,11 @@ class WildfireSwarmEnv:
         drone_flipped = False
         for i, drone in enumerate(self.drones):
             if self.is_drone_flipped(drone):
-                print(f"Drone {i} flipped! Episode terminated.")
+                if not self.flipped:
+                    print(f"Drone {i} flipped! Episode terminated.")
+                    reward -= 100.0  # Harsh penalty for flipping
+                    self.flipped = True
                 drone_flipped = True
-                reward -= 100.0  # Harsh penalty for flipping
                 break
         
         # Check termination state: Game over if all drones detect fire, max steps reached, OR any drone flipped

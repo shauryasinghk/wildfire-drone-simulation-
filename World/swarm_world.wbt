@@ -49,6 +49,17 @@ DEF drone_0 Mavic2Pro {
   name "drone_0"
   controller "drone_controller"
   customData "2"
+  children [
+    DistanceSensor {
+      name "ground_distance_sensor"
+      translation 0 0 0.05
+      rotation 1 0 0 1.5708
+      lookupTable []
+      minFrequency 0
+      maxFrequency 20
+      resolution 0.001
+    }
+  ]
 }
 DEF FIRE_0 Transform {
   translation -4.05 0.0999949 4

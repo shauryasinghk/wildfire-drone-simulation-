@@ -1,4 +1,4 @@
-from controller import Robot, Motor, GPS, Gyro, Camera, InertialUnit
+from controller import Robot, Motor, GPS, Gyro, Camera, InertialUnit, DistanceSensor
 import numpy as np
 import math
 from typing import Dict, cast
@@ -32,6 +32,12 @@ imu.enable(timestep)
 camera = cast(Camera, robot.getDevice('camera'))
 camera.enable(4 * timestep)
 
+try:
+    ground_sensor = cast(DistanceSensor, robot.getDevice('ground_distance_sensor'))
+    ground_sensor.enable(timestep)
+except Exception:
+    ground_sensor = None
+
 # --- PID FLIGHT TUNING CONSTANTS ---
 HOVER_SPEED = 68.5      # Baseline motor RPM required to counteract gravity
 
@@ -46,7 +52,11 @@ K_D_ANG = 8.0           # Rotational angular velocity dampening (increased from 
 K_YAW_D = 3.0           # Anti-spin angular brake (Stops the spinning)
 
 MAX_ANGLE = 0.25        # Max tilt pitch/roll constraint (reduced from 0.4 to prevent extreme angles)
-STEP_SIZE = 0.04        # NEW: Distance (meters) the target shifts per timestep when moving
+STEP_SIZE = 0.14        # Distance (meters) the target shifts per timestep when moving; increased for faster traversal
+ALTITUDE_MIN = 0.5      # Minimum safe flight altitude
+ALTITUDE_MAX = 4.0      # Maximum altitude target
+MIN_THRUST = 20.0       # Minimum thrust to keep rotors spinning and avoid ground stall
+RESET_JUMP_THRESHOLD = 2.0  # If the drone teleports farther than this, reset target_pos
 
 # Historical positions for velocity calculation
 past_x = 0.0
@@ -92,7 +102,16 @@ while robot.step(timestep) != -1:
         # Snap target coordinates to current position, but at safe cruising altitude
         target_pos = np.array([pos[0], pos[1], 3.0]) 
         first_frame = False
-        
+    else:
+        jump_distance = np.linalg.norm(pos - np.array([past_x, past_y, past_z]))
+        if jump_distance > RESET_JUMP_THRESHOLD:
+            target_pos = np.array([
+                pos[0],
+                pos[1],
+                np.clip(pos[2] + 1.0, ALTITUDE_MIN, ALTITUDE_MAX)
+            ])
+            print(f"Reset detected: teleport jump {jump_distance:.2f}m, reinitializing target_pos.")
+    
     # Calculate velocities via sensor derivation
     vel_x = (pos[0] - past_x) / dt
     vel_y = (pos[1] - past_y) / dt
@@ -116,6 +135,19 @@ while robot.step(timestep) != -1:
     elif action == 6:  # Descend (Down / -Z)
         target_pos[2] -= STEP_SIZE
     # Action 0 (Hover) falls through and leaves target_pos unchanged, forcing stabilization.
+
+    # Use the downward distance sensor to detect terrain height below the drone
+    height_above_ground = pos[2]
+    if ground_sensor is not None:
+        distance_value = ground_sensor.getValue()
+        if not np.isnan(distance_value) and distance_value > 0.0:
+            height_above_ground = distance_value
+
+    if action == 6 and height_above_ground <= ALTITUDE_MIN:
+        target_pos[2] = pos[2]
+
+    # Clamp altitude target so it stays within safe bounds
+    target_pos[2] = np.clip(target_pos[2], ALTITUDE_MIN, ALTITUDE_MAX)
         
     # Calculate spatial deviations
     error = target_pos - pos  # [Error_X, Error_Y, Error_Z]
@@ -124,6 +156,7 @@ while robot.step(timestep) != -1:
     
     # 1. Altitude Control (Thrust)
     thrust = HOVER_SPEED + (K_P_ALT * error[2]) - (K_D_ALT * vertical_vel)
+    thrust = np.clip(thrust, MIN_THRUST, 90.0)
     
     # 2. Position Control -> Map global errors and velocities into local body frame
     c = math.cos(yaw)
