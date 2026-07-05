@@ -208,7 +208,8 @@ class WildfireSwarmEnv:
             distance_from_center = np.linalg.norm(my_pos[:2] - FOREST_CENTER)
             if distance_from_center > boundary:
                 excess = distance_from_center - boundary
-                shared_reward -= 0.1 * excess  # Penalty increases with distance beyond boundary
+                shared_reward -= 0.5 * excess  # Stronger penalty for leaving the forest boundary
+                print(f"Drone {i} boundary penalty: {excess:.2f}m beyond allowed forest radius.")
 
         # 2. Team Proximity Proximity Penalties
         for i in range(NUM_DRONES):
