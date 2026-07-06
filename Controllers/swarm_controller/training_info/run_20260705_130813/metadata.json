@@ -1,0 +1,7 @@
+{
+  "training_end_time": "20260705_142916",
+  "total_timesteps_completed": 500000,
+  "checkpoints_saved": 10,
+  "final_model_saved": true,
+  "status": "completed"
+}

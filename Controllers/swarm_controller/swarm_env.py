@@ -4,9 +4,9 @@ import math
 from typing import List, Dict, Tuple
 
 # --- RL ENVIRONMENT HYPERPARAMETERS ---
-NUM_DRONES = 1
+NUM_DRONES = 4
 SPACING = 3.0
-FOREST_SIZE = 69.0       # Side length of the square forest area in meters
+FOREST_SIZE = 85      # Side length of the square forest area in meters
 FOREST_ORIGIN = np.array([-FOREST_SIZE / 2.0, -FOREST_SIZE / 2.0])
 FOREST_MAX = FOREST_ORIGIN + np.array([FOREST_SIZE, FOREST_SIZE])
 FOREST_CENTER = FOREST_ORIGIN + np.array([FOREST_SIZE / 2.0, FOREST_SIZE / 2.0])
@@ -84,6 +84,7 @@ class WildfireSwarmEnv:
                 f'name "drone_{i}" '
                 f'translation {x} {y} {z} '
                 f'controller "drone_controller" '
+                f'bodySlot DistanceSensor {{ name "ground_distance_sensor" }} '
                 f'}}'
             )
             children_field.importMFNodeFromString(-1, drone_string)
@@ -209,7 +210,7 @@ class WildfireSwarmEnv:
             if distance_from_center > boundary:
                 excess = distance_from_center - boundary
                 shared_reward -= 0.5 * excess  # Stronger penalty for leaving the forest boundary
-                print(f"Drone {i} boundary penalty: {excess:.2f}m beyond allowed forest radius.")
+                # print(f"Drone {i} boundary penalty: {excess:.2f}m beyond allowed forest radius.")
 
         # 2. Team Proximity Proximity Penalties
         for i in range(NUM_DRONES):
@@ -274,6 +275,7 @@ class WildfireSwarmEnv:
                     reward -= 100.0  # Harsh penalty for flipping
                     self.flipped = True
                 drone_flipped = True
+                reward -= 100.0  # Harsh penalty for flipping
                 break
         
         # Check termination state: Game over if all drones detect fire, max steps reached, OR any drone flipped

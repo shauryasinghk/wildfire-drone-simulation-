@@ -1,0 +1,10 @@
+{
+  "num_drones": 1,
+  "forest_size": 71,
+  "grid_resolution": 2.0,
+  "collision_distance": 4.0,
+  "detection_radius": 6.0,
+  "max_episode_steps": 5000,
+  "observation_space": "Box(6,)",
+  "action_space": "MultiDiscrete([7] * 1)"
+}

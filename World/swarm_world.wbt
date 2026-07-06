@@ -12,10 +12,9 @@ WorldInfo {
   basicTimeStep 16
 }
 Viewpoint {
-  orientation 0.13190508641782367 0.5139015457349512 -0.8476474794797271 0.5880606137808674
-  position -25.938482905990117 -4.634087247756999 1.955919114901032
-  follow "drone_0"
-  followType "Mounted Shot"
+  orientation -0.3571923111141712 0.026983614617325867 0.9336410110010704 3.0007724620720904
+  position -20.377811327387317 -7.297840133529803 0.9407982827965238
+  followType "Pan and Tilt Shot"
   lensFlare LensFlare {
     transparency 0.7
     scale 1.2
@@ -48,16 +47,11 @@ DEF drone_0 Mavic2Pro {
   translation -21.41 -7.08 0.05
   name "drone_0"
   controller "drone_controller"
+  window "generic_window"
   customData "2"
-  children [
+  bodySlot [
     DistanceSensor {
       name "ground_distance_sensor"
-      translation 0 0 0.05
-      rotation 1 0 0 1.5708
-      lookupTable []
-      minFrequency 0
-      maxFrequency 20
-      resolution 0.001
     }
   ]
 }
@@ -105,6 +99,7 @@ Transform {
         ]
         materialIndex 1
       }
+      castShadows FALSE
     }
   ]
 }
