@@ -15,6 +15,13 @@ COLLISION_DIST = 4.0     # Penalty threshold if drones get too close
 DETECTION_RADIUS = 6.0   # Distance inside which a drone "detects" the fire
 MAX_EPISODE_STEPS = 5000 # Maximum steps per episode to prevent infinite loops
 
+# --- NEW SWARM COORDINATION REWARDS ---
+NEIGHBOR_TARGET_DIST = 8.0      # Desired minimum separation between drones
+NEIGHBOR_PENALTY_WEIGHT = 1.5   # Penalty strength for clustering
+NOVELTY_REWARD_WEIGHT = 0.35    # Reward for visiting under-observed cells
+NEW_CELL_REWARD = 1.0           # Bonus for visiting a completely new cell
+VELOCITY_REWARD_WEIGHT = 0.03   # Reward for useful motion
+
 class WildfireSwarmEnv:
     def __init__(self, supervisor_instance: Supervisor):
         self.sv = supervisor_instance
@@ -35,6 +42,7 @@ class WildfireSwarmEnv:
         # Track which drones have already received a detection reward this episode
         self.has_detected_fire = {i: False for i in range(NUM_DRONES)}
         self.last_fire_distances = {}
+        self.prev_positions = {}
         self.step_count = 0
         self.flipped = False
         
@@ -53,6 +61,7 @@ class WildfireSwarmEnv:
         # Initialize Forest Coverage Grid Tracking Matrix
         self.grid_cells = int(np.ceil(FOREST_SIZE / GRID_RESOLUTION))
         self.coverage_grid = np.zeros((self.grid_cells, self.grid_cells), dtype=np.int32)
+        self.visitation_grid = np.zeros((self.grid_cells, self.grid_cells), dtype=np.int32)
 
     def _spawn_swarm(self):
         root = self.sv.getRoot()
@@ -106,9 +115,15 @@ class WildfireSwarmEnv:
             self.camera_node.getField("rotation").setSFRotation(self.initial_camera_state["rotation"])
         
         self.coverage_grid.fill(0)
+        self.visitation_grid.fill(0)
         # Clear per-drone detection flags and reward shaping state at the start of each episode
         self.has_detected_fire = {i: False for i in range(NUM_DRONES)}
         self.last_fire_distances = {}
+        self.prev_positions = {
+            i: np.array(self.initial_states[i]["translation"][:2], dtype=np.float32)
+            if i in self.initial_states else np.array([0.0, 0.0], dtype=np.float32)
+            for i in range(NUM_DRONES)
+        }
         self.step_count = 0
         self.flipped = False
         self.sv.step(self.timestep)
@@ -184,45 +199,50 @@ class WildfireSwarmEnv:
     def compute_step_rewards(self) -> Tuple[float, Dict[int, bool]]:
         """
         Calculates the global collective cooperative reward pool.
-        Encourages dynamic exploration, penalizes overlaps, rewards fire sweeps.
+        Encourages broad coverage, penalizes clustering, and rewards useful motion.
         """
         shared_reward = 0.0
         detections = {i: False for i in range(NUM_DRONES)}
         fire_pos = self.get_global_fire_pos()
         positions = [np.array(d.getPosition()) if d else np.array([0.,0.,0.]) for d in self.drones]
 
-        # 1. Coverage Reward Allocation Loop
+        # 1. Coverage / novelty reward allocation loop
         for i, my_pos in enumerate(positions):
-            # Map physical continuous position coordinates down into our virtual index array grid
             grid_x = int((my_pos[0] - FOREST_ORIGIN[0]) / GRID_RESOLUTION)
             grid_y = int((my_pos[1] - FOREST_ORIGIN[1]) / GRID_RESOLUTION)
-            
+
             if 0 <= grid_x < self.grid_cells and 0 <= grid_y < self.grid_cells:
                 if self.coverage_grid[grid_x, grid_y] == 0:
                     self.coverage_grid[grid_x, grid_y] = 1
-                    shared_reward += 1.0  # Smaller exploration bonus so the agent focuses on finding the fire
+                    shared_reward += NEW_CELL_REWARD
 
-        # 1.5 Boundary Constraint: Penalize drones wandering too far from forest area
-        # Prevents extreme exploration that destabilizes the drone
+                visit_count = int(self.visitation_grid[grid_x, grid_y])
+                novelty_bonus = NOVELTY_REWARD_WEIGHT / (1.0 + visit_count)
+                shared_reward += novelty_bonus
+                self.visitation_grid[grid_x, grid_y] += 1
+
+        # 1.5 Boundary constraint: penalize wandering too far from the forest area
         for i, my_pos in enumerate(positions):
-            boundary = (FOREST_SIZE / 2.0) * 0.75  # Allow exploration up to 75% of forest half-width from center
+            boundary = (FOREST_SIZE / 2.0) * 0.75
             distance_from_center = np.linalg.norm(my_pos[:2] - FOREST_CENTER)
             if distance_from_center > boundary:
                 excess = distance_from_center - boundary
-                shared_reward -= 0.5 * excess  # Stronger penalty for leaving the forest boundary
-                # print(f"Drone {i} boundary penalty: {excess:.2f}m beyond allowed forest radius.")
+                shared_reward -= 0.5 * excess
 
-        # 2. Team Proximity Proximity Penalties
+        # 2. Team proximity penalties to discourage clustering
         for i in range(NUM_DRONES):
             for j in range(i + 1, NUM_DRONES):
-                dist = np.linalg.norm(positions[i] - positions[j])
-                if dist < COLLISION_DIST:
-                    shared_reward -= 10.0 * (COLLISION_DIST - dist)  # Progressive safety constraint
+                dist = np.linalg.norm(positions[i][:2] - positions[j][:2])
+                if dist < NEIGHBOR_TARGET_DIST:
+                    shared_reward -= NEIGHBOR_PENALTY_WEIGHT * (NEIGHBOR_TARGET_DIST - dist)
 
         # 3. Dense reward shaping for approaching the fire
         for i, my_pos in enumerate(positions):
-            dist_to_fire = np.linalg.norm(my_pos[:2] - fire_pos[:2])  # 2D Ground distance
+            dist_to_fire = np.linalg.norm(my_pos[:2] - fire_pos[:2])
             prev_dist = self.last_fire_distances.get(i)
+            prev_pos = self.prev_positions.get(i)
+            grid_x = int((my_pos[0] - FOREST_ORIGIN[0]) / GRID_RESOLUTION)
+            grid_y = int((my_pos[1] - FOREST_ORIGIN[1]) / GRID_RESOLUTION)
 
             if prev_dist is not None:
                 dist_change = prev_dist - dist_to_fire
@@ -231,19 +251,30 @@ class WildfireSwarmEnv:
                 else:
                     shared_reward -= 0.20 * abs(dist_change)
 
+            if prev_pos is not None:
+                travel = np.linalg.norm(my_pos[:2] - prev_pos[:2])
+                if travel > 0.05:
+                    useful_motion = False
+                    if prev_dist is not None and (prev_dist - dist_to_fire) > 0.05:
+                        useful_motion = True
+                    if 0 <= grid_x < self.grid_cells and 0 <= grid_y < self.grid_cells:
+                        if self.coverage_grid[grid_x, grid_y] == 1 and self.visitation_grid[grid_x, grid_y] == 1:
+                            useful_motion = True
+                    if useful_motion:
+                        shared_reward += VELOCITY_REWARD_WEIGHT * travel
+
             if dist_to_fire <= DETECTION_RADIUS:
-                # Mark current detection (used for done condition)
                 detections[i] = True
-                # Give a one-time positive reward the first time this drone detects the fire
                 if not self.has_detected_fire.get(i, False):
                     self.has_detected_fire[i] = True
                     shared_reward += 50.0
-                    print(f"Drone {i} entered detection radius at {dist_to_fire:.2f}m and received the reward.")
 
             self.last_fire_distances[i] = dist_to_fire
 
-        # Per-step cost: Encourages agent to find fire quickly without wasting time
-        # Over 5000 steps, this accumulates to -500 penalty, making slow search much more expensive
+        # Update previous positions for the next step after reward evaluation
+        self.prev_positions = {i: np.array(pos[:2], dtype=np.float32) for i, pos in enumerate(positions)}
+
+        # Per-step cost: encourage efficient search without wasting time
         shared_reward -= 0.10
 
         return shared_reward, detections
